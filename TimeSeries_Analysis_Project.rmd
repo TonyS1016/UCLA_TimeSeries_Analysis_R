@@ -1,0 +1,605 @@
+---
+title: "Project #2"
+author: "Alexander Grazulis, Maksym Malysh, and Tianyu Sun"
+date: "12/9/2020"
+fontfamily: mathpazo
+output:
+  pdf_document:
+    toc: true
+  fig_caption: yes
+  highlight: haddock
+  number_sections: true
+  df_print: paged
+fontsize: 10.5pt
+editor_options:
+chunk_output_type: console
+---
+
+```{r, echo=FALSE, warning=FALSE, message= FALSE}
+library(forecast)
+library(TTR)
+library(cusum)
+library(strucchange)
+library(olsrr)
+library(knitr)
+library(psych)
+library(graphics)
+library(tseries)
+library(qcc)
+library(vars)
+library(dplyr)
+```
+
+##############
+# I. Introduction 
+##############
+
+```{r}
+#Reading in data for California construction workers
+constr_data <- read.csv("CACONSN.csv")
+
+#Reading in data for private construction spending
+constr_data2 = read.csv("PRMFGCON.csv")
+```
+
+Remark:
+
+This data examines monthly observations measuring the number of persons (in thousands) that are employed for construction work in the state of California. The data is not seasonally adjusted, and begins January 1990, going right up to the most recent full month of observations (October 2020). This data contains a clear seasonal component with the troughs typically occurring around January/February, and the peaks typically occurring around August/September. Additionally, we note there is a cyclical component in the data that shows a decline in employment numbers about every ten years, which is followed by a consistently increasing trend in the years between. This indicates that the employment of construction workers in California tends to follow a cycle that is in line with recessionary periods in the U.S. economy. Lastly, we see there is an increasing trend throughout the data, where-in the low points of our cycles are not as low as previous periods. This makes intuitive sense because we wouldn't expect California businesses to decrease construction employment to a point where more workers are being let go during recessionary periods than are being retained. Since companies need to maintain a certain level of employment to fulfill projects that were undertaken prior to a recessionary period (where by investment and consumption are down leading to a likely decrease in the number of projects being taken on). Also, this increasing trend makes sense because California has been continually developing for many years now, meaning that more and more construction workers are required.
+For our second data we chose "Total Private Construction Spending: Manufacturing". This data is from FRED, it is a monthly time-series from January 1993 until October 2020. The data is measured in millions, it exhibits cycles, seasonality, and trend. Looking at the data we see that it is upward trending, with cycles that are closely aligned with our business cycle, though we do notice that it somewhat lags behind the business cycle. For example, manufacturing construction spending started to decrease in May of 2019, which is when the economy was already crashing from the housing bubble. This data is interesting to our group because American manufacturing has been decreasing its share in the American economy for decades. We would like to forecast construction manufacturing spending in the future, and study the cycles that construction spending goes through in our business cycles. 
+
+##############
+# II. Results 
+##############
+
+## (1.A)
+```{r}
+#Creating time series object of data
+ts_data1 <- ts(constr_data[,2], start=1990, freq=12)
+t <- seq(1990, 2020, length=length(ts_data1))
+
+#Plot of time series data
+par(mfrow=c(2,1))
+plot(ts_data1, ylab="Employees (in thousands)",
+     main="Time Series of Employed California Construction Workers")
+
+#ACF and PACF
+tsdisplay(ts_data1,
+          main="Time Series of Employed California Construction Workers")
+```
+
+##(1.B)
+```{r}
+#See how it looks
+head(constr_data2)
+tail(constr_data2)
+
+#Creating time series object of data
+ts_data2 = ts(constr_data2$PRMFGCON, start= c(1993,1),
+                              frequency=12)
+time = seq(1993, 2020.83, length=length(ts_data2))
+
+#Plot of time series data
+par(mfrow=c(2,1))
+plot(ts_data2, ylab="Dollars (in millions)", 
+     main="Total Private Construction Spending: Manufacturing", 
+     col="blue", lwd=2)
+
+#ACF and PACF
+tsdisplay(ts_data2,
+      main="Time Series of Total Private Construction Spending: Manufacturing")
+```
+
+## (2.A)
+```{r}
+#Creating baseline ARIMA model
+base_mod1 <- auto.arima(ts_data1)
+
+#Summary statistics
+summary(base_mod1)
+
+#Plot of model fit against time series data
+plot(ts_data1,ylab="Employees (in thousands)",xlab="Time",lwd=2,
+     col='skyblue3', 
+     main="Time Series of Employed California Construction Workers")
+lines(fitted(base_mod1),col="red3")
+```
+
+Remark:
+
+We see that this base model constructed using auto.arima() produces a fit that resembles the data quite closely. We note that the model fit tends to be slightly above or below the data at the peaks and troughs. That said, it still follows the fluctuations very well, which makes sense because this auto.arima() function runs a variety of tests (unit root, AIC, and MLE) to determine the optimal p,d,q (P,D,Q) based on the lowest AIC. We note that it determined a non-seasonal (1,0,0) and seasonal (1,1,0) with a drift.
+
+## (2.B)
+```{r}
+#Creating baseline ARIMA model
+base_mod2 <- auto.arima(ts_data2)
+
+#Summary statistics
+summary(base_mod2)
+
+#Plot of model fit against time series data
+plot(ts_data2,ylab="Dollars (in millions)", xlab="Time", lwd=2, col='skyblue3',
+     main="Time Series of Total Private Construction Spending: Manufacturing")
+lines(fitted(base_mod2),col="red3")
+```
+
+Remark:
+
+Auto.arima decided that this an AR(1) processes with seasonal MA(2) with drift. The model has an AIC of 4315.06, which is very good because the whole point of this algorithm is to come up with the best model that it can. The model has a sigma-squared of 35858, which is the variance for our random shocks. We have a root mean square error of 185.93 and a mean error of 11.45855, which is not ideal since this means that our model on average is not perfectly fitting. The MAPE is 3.7% which means that our model contains about 4% error in the fit. 
+
+## (3.A)
+```{r}
+#Decomposition plot
+par(mfrow=c(2,1))
+plot(stl(ts_data1,s.window="periodic"))
+
+#Creating model w/ season+cycle+trend
+main_mod <- arima(ts_data1,order=c(1,0,0),
+                  seasonal=list(order=c(1,1,0),include.drift=TRUE,
+                  xreg = t+I(t^2)))
+
+#Summary statistics
+summary(main_mod)
+
+#Plot of model fit against time series data
+plot(ts_data1,ylab="Employees (in thousands)", xlab="Time",
+     lwd=2, col='skyblue3', 
+     main="Time Series of Employed California Construction Workers")
+lines(fitted(main_mod),col="red3")
+```
+
+Remark:
+
+Previously, we have built up this model by separately creating a seasonal, cyclical, and trend model that fits the actual data as closely as possible. In this case, I have used the non-seasonal parameters (p,d,q) and seasonal parameters (P,D,Q) that were returned by the auto arima function. The first and third order terms indicate the number of previous values used in determining the present value of an AR/MA model. In this first set, consisting of data on construction workers employed in California, we see we have a non-seasonal AR(1) and seasonal AR(1). After these appropriate numbers were determined for our order terms, we then fitted a trend to our data. This trend, which was quadratic in our case, was then added into our model which already included the optimal seasonal and cyclical components. Once we fit our model to the original data and examine the summary statistics, we see that it outperforms the baseline model.  Not only do we see a lower AIC for this model, but we also note lower ME, RMSE, MAE, MPE, MAPE, and MASE values. All of which supports the notion that this model, which includes seasonal, cyclical, and trend components, outperforms our baseline model.
+
+## (3.B)
+```{r}
+#Creating model w/ season+cycle+trend
+main_mod2 = arima(ts_data2, order= c(1,0,0), seasonal=list(order=c(0,1,2),
+                                  include.drift=TRUE, xreg=time+I(time^2)))
+
+#Summary statistics
+summary(main_mod2)
+
+#Plot of model fit against time series data
+plot(ts_data2,ylab="Dollars (in millions)", xlab="Time", lwd=2, col='skyblue3',
+     main="Time Series of Total Private Construction Spending: Manufacturing")
+lines(fitted(main_mod2),col="red3")
+```
+
+Remark:
+
+Auto.arima decided that this an AR(1) processes with seasonal MA(2) with drift. I added a quadratic trend to the model, in order to improve upon the auto.arima algorithm. The model has an AIC of 4315.06. The model has sigma^2 of 35858, which is the variance for our random shocks. We have a root mean square error of 185.93 and a mean error of 11.45855, which is not ideal since this means that our model on average is not perfectly fitting. The MAPE is 3.7% which means that our model contains about 4% error in the fit. The MPE is .2365 which means the mean percentage is around .24%. 
+
+## (4.A)
+```{r}
+#Plot of residuals vs fitted values
+plot(fitted(main_mod), main_mod$residuals, main="Fitted vs. Residuals",
+      xlab="Fitted", ylab="Residuals")
+abline(h=0, col="red3")
+```
+
+Remark:
+
+We see this plot of the residuals against fitted values indicates observations are centered around the horizontal line from zero, with no clear pattern. This supports the notion that our residuals and fitted values are not correlated with each other. Thus, indicating that the errors in our main model are homoskedastic. We do see at least one, maybe two, potential outliers in this plot. Note: the random scatter around zero becomes even more apparent if we change the y-axis of our plot, but we would be unable to see the potential outliers. 
+
+## (4.B)
+```{r}
+plot(fitted(main_mod2), main_mod2$residuals,
+     main='Private Manufacturing Construction Spending Model Residuals',
+     ylab="Residuals", xlab="Fitted")
+abline(h=0, col="red3")
+```
+
+Remark:
+
+Above is the residual plot of the private manufacturing construction data. For the most part, I would describe this plot as white noise. However, I notice that as we increase our independent variable (time) there is most variation in the residuals, which might indicate heteroskedasticity in our errors.
+
+## (5.A)
+```{r}
+#ACF and PCF of residuals
+par(mfrow=c(2,1))
+acf(main_mod$residuals, lag=36, main='ACF of Respective Residuals')
+pacf(main_mod$residuals, lag=36, main='PACF of Respective Residuals')
+```
+
+Remark:
+
+These plots indicate that there is seasonal and non-seasonal components to our ARIMA model. Specifically, we note that we have a non-seasonal AR(1) and seasonal AR(1), with a first order difference of 1, which means that 1 is the number of seasonal differences required for stationarity in our model. Additionally, we see geometric decay in our ACF and PACF plots, which is in line with our model building process because it indicates a seasonal and non-seasonal AR(1) process. This geometric decay appears to be fairly gradual in both plots.
+
+## (5.B)
+```{r}
+#ACF and PCF of residuals
+par(mfrow=c(2,1))
+acf(main_mod2$residuals, lag=36, main='ACF of Respective Residuals')
+pacf(main_mod2$residuals, lag=36, main='PACF of Respective Residuals')
+```
+Remark:
+
+Above is the plot of our acf and pacf residuals. For the most part, I do not see any pattern in the acf residuals. The first residual is highly statistically significant. However, as I look at the other parts of this plot, I think that it mostly looks like white noise - there is mainly randomness with some odd statistically significant pacf spikes here and there. 
+
+## (6.A)
+```{r}
+#Recursive CUSUM
+plot(efp(main_mod$res ~ 1, type="Rec-CUSUM"))
+```
+
+Remark:
+
+In the Recursive CUSUM chart, we see that there appears to be no structural break in our data since the trend line stays within our confidence bands in red. 
+
+## (6.B)
+```{r}
+#Recursive CUSUM
+plot(efp(main_mod2$res ~ 1, type="Rec-CUSUM"))
+```
+
+Remark:
+
+
+We can see that the quadratic trend that I have fitted into the model does is a good fit, since the fluctuations in our residuals do not break our confidence bands. They do go below zero, but tend to come back up. And when the residuals go above 0, they come back down. The plot of the recursive residuals mostly scatters around zero randomly. I don't see any evidence of a break in the model fit.
+
+
+
+## (7.A)
+```{r}
+#Plotting recursive residuals 
+plot(recresid(main_mod$res~1),ylab="Recursive Residuals",
+     main="Plot of Recursive Residuals", xlim=c(0,400))
+abline(h=0, col="red3")
+```
+
+Remark:
+
+We see that the recursive residuals scatter around zero, but it does appear that there is a slight pattern of fluctuations in these residuals. The scatter does not appear to be consistently above and below zero, since many of the data points tend to cluster together. That said, it does not appear to have any sort of heteroskedastic pattern, but it does seem like the observations consistently trend up and down slightly from the zero line. Also, we see that there are a few potential outliers towards the most recent observations, which makes sense given the onset of the COVID-19 pandemic. 
+
+## (7.B)
+```{r}
+#Plotting recursive residuals for commercial construction spending model
+plot(recresid(main_mod2$res~1),ylab="Recursive Residuals",
+     main="Plot of Recursive Residuals", xlim=c(0,350))
+abline(h=0, col="red3")
+```
+
+Remark:
+
+The plot of the recursive residuals above mostly scatter around zero randomly. The residuals don't indicate a break in the model since they are mainly scattered around zero. However, I do notice a slight increase in the variation as the independent variable increases, which is associated with heteroskedasticity. 
+
+## (8.A)
+The diagnostic statistics reveal that we have in fact improved the fit of our model by including the quadratic trend component. We see a decrease in error measures across the board, but of course it is not a perfect fit to our data. Also, we have a non-seasonal AR(1) and seasonal AR(1), with a first order difference of 1, which means that 1 is the number of seasonal differences required for stationarity in our model. Determining the correct numbers for these parameters was crucial in the modeling process and we can use the ACF and PACF plots to do so with this data since there is no MA process as well. Additionally, we see geometric decay in our ACF and PACF plots of our residuals, which is in line with our model building process because it indicates a seasonal and non-seasonal AR(1) process. This geometric decay appears to be fairly gradual in both plots.
+
+## (8.B)
+The model has an AIC of 4315.06. I can say confidently that this AIC is as good as gets to fit our data, since I added a trend to algorithm whose sole purpose is to  find the best fitting values. The model has sigma-squared of 35858, which is the variance for our random shocks. We have a root mean square error of 185.93 and a mean error of 11.45855, which is not ideal since this means that our model on average is not perfectly fitting. The MAPE is 3.7% which means that our model contains about 4% error in the fit. the MPE is .2365 which means the mean percentage is around .24%. In the parts 7 and 8 above we saw that our model passed the recursive residual test, in other words, there was not evidence of a model break.
+
+## (9.A)
+```{r}
+#Forecast 12 steps ahead w/ error bands
+plot(forecast(main_mod,h=12, level=c(50,80,95)),
+     xlab="Time", ylab="Employees (in thousands)",
+     main="Forecast of Employed California Construction Workers")
+```
+
+## (9.B)
+```{r}
+#Forecast 12 steps ahead w/ error bands
+plot(forecast(main_mod2,h=12, level=c(50,80,95)),
+     xlab="Time", ylab="Dollars (in millions)",
+     main="Forecast of Total Private Construction Spending: Manufacturing")
+```
+
+## (10)
+```{r}
+#Calling in same data set, but starting at 1993
+constr_data_1993 <- read.csv("CACONSN_1993.csv")
+
+#Creating time series object of new data from 1993
+ts_data1_1993 <- ts(constr_data_1993[,2], start=1993, freq=12)
+t_new <- seq(1993, 2020, length=length(ts_data1_1993))
+
+#Creating data frame combining two time series objects 
+comb_ts = cbind(ts_data1_1993,ts_data2)
+dfcomb_ts = data.frame(comb_ts)
+
+#Testing VAR model fits using our two variables 
+varmodel <- VAR(dfcomb_ts, p=10)
+VARselect(dfcomb_ts,10)
+VARselect(dfcomb_ts,15)
+
+#Summary statistics
+summary(varmodel)
+
+#Saving selected VAR model to new variable 
+VARMODEL = VAR(dfcomb_ts, p=10)
+
+#Plot of final VAR model, will be submitted separately
+pdf("Var_plots.pdf", width=8, height=8)
+plot(VARMODEL)
+dev.off()
+```
+
+Remark:
+
+It looks like for the California construction employment data it matches up with the data quite well, the residuals are centered around 0. Also, it looks like there is a little bit of structure in the first half, a break point, and then more or less an apparent white noise process. ACF and PACF show no structure, there is a spike at 12 however, denoting a relationship that occurs on a yearly basis. For the data on total private construction spending: manufacturing, our model fits the data quite well, the residuals appear to follow a white noise process as there is no discernible structure or pattern to the residuals. However, it does look like on average as the years go by, the variance in the residuals tend to increase. Similar to the California construction employment data, our ACF and PACF for our residuals show no structure except for a spike at the 12th lag.
+
+## (11)
+```{r}
+#Computing impulse response functions.
+irf(VARMODEL)
+
+#Saving impulse response function into variable
+irf_var <- irf(VARMODEL, n.ahead=36)
+
+#Plot of impulse response function
+par(mfrow=c(2,2))
+plot(irf_var, plot.type="single", main="Plot of Impulse Response Functions")
+```
+
+Remark:
+
+Looks like response of California construction employment on itself is pretty much a small constant positive effect where it continues to effect itself indefinitely. For the effect of California construction employment on total private construction spending: manufacturing, it looks like there is an increasing effect to the first period that then slowly dies down in its effectiveness through time. This eventually hits 0 and then bounces up again. The effect total private construction spending: manufacturing has on California construction employment is 0. For total private construction spending: manufacturing on itself, it looks like there is a consistent oscillating effect that it has on itself. The effectiveness decreases in the 1st period but then rises again to the 3rd, dips down, and then rises again in the 5.
+
+
+## (12)
+```{r}
+#Performing a Granger-Causality test
+grangertest(ts_data1_1993~ts_data2, order = 10)
+grangertest(ts_data2~ts_data1_1993, order = 10)
+
+#Using order = 13, as previously suggested, tells a different story
+grangertest(ts_data1_1993~ts_data2, order = 13)
+grangertest(ts_data2~ts_data1_1993, order = 13)
+```
+
+Remark:
+
+The granger test for if total private construction spending: manufacturing granger causes California construction employment now agrees with our IRF function that total private construction spending: manufacturing does not granger cause California construction employment. California construction employment still granger causes total private construction spending: manufacturing here. This tells us that private construction spending does not have a time series effect on the number of California construction workers. But that the number of California construction workers does have an effect on total private construction spending: manufacturing.
+
+## (13)
+```{r}
+#Forecasting 12 steps ahead using VAR model 
+VarPred = predict(object=VARMODEL, n.ahead=12)
+
+#Plot of VAR forecast
+par(mfrow=c(2,1))
+plot(VarPred, xlab="Number of Monthly Observations")
+
+#Plot of ARIMA forecasts
+plot(forecast(main_mod,h=12,level=c(50,80,95)),
+     main="Forecast of Employed California Construction Workers",
+     ylab="Employees (in thousands)", xlab="Time")
+plot(forecast(main_mod2,h=12, level=c(50,80,95)),
+     main="Forecast of Total Private Construction Spending: Manufacturing",
+     ylab="Dollars (in millions)", xlab="Time")
+```
+
+Remark:
+
+For the most part the VAR and ARIMA models agree in their forecast error bounds, the general trend, as well as the seasonality components. That being said, it appears as though the ARIMA model, especially for California construction employment is basing its forecast a bit too much on the recent troughs resulting from the COVID-19 pandemic. This notion is best represented by the forecast of employed California construction workers, because the data follows a noticeably consistent seasonal pattern prior to COVID-19. At the onset of COVID-19 we see a sharp decline in employment that is unlike any prior decline, which is the pattern that our forecast shows, meaning that it is likely misrepresenting the true pattern in the data due to an overvaluation of the most recent observations.
+
+## (14.A)
+Data of Employed California Construction Workers
+```{r}
+#12 Steps Ahead forecast/MAPE: Employed California Construction Workers
+ts.MAPE1 = vector()
+for (i in 1:25){
+  win.f = ts(ts_data1[1:(112+i)], start = c(1990,1), frequency = 12)
+  fcast.out = as.vector(as.data.frame(
+    forecast(model=main_mod, object = win.f, h = 12))[,2])
+  trueVal = as.vector(ts_data1[(112+i):(123+i)])
+  ts.MAPE1[i] = mean(abs((trueVal-fcast.out)/trueVal))*100
+}
+
+#Printing MAPE
+ts.MAPE1
+
+#Plot of MAPE for 12 step ahead forecast
+plot(ts.MAPE1, type="o", lwd=2, ylab="Mean Absolute Percentage Error",
+     main="12 Step Ahead Recursive Backtest Forecast")
+```
+
+Data of Total Private Construction Spending: Manufacturing
+```{r}
+#12 Steps Ahead forecast/MAPE: Total Private Construction Spending: 
+#Manufacturing
+ts.MAPE1 = vector()
+for (i in 1:25){
+  win.f = ts(ts_data2[1:(112+i)], start = c(1993,1), frequency = 12)
+  fcast.out = as.vector(as.data.frame(
+    forecast(model=main_mod2, object = win.f, h = 12))[,2])
+  trueVal = as.vector(ts_data2[(112+i):(123+i)])
+  ts.MAPE1[i] = mean(abs((trueVal-fcast.out)/trueVal))*100
+}
+
+#Printing MAPE
+ts.MAPE1
+
+#Plot of MAPE for 12 step ahead forecast
+plot(ts.MAPE1, type="o", lwd=2, ylab="Mean Absolute Percentage Error", 
+     main="12 Step Ahead Recursive Backtest Forecast")
+```
+
+## (14.B)
+Data of Employed California Construction Workers
+```{r}
+#1 step ahead forecast/APE: Employed California Construction Workers
+ts.APE1 = vector()
+for (i in 1:25){
+  win.f = ts(ts_data1[1:(112+i)], start = c(1990,1), frequency = 12)
+  fcast.out = as.vector(as.data.frame(
+    forecast(model=main_mod, object = win.f, h = 1))[,2])
+  trueVal = as.vector(ts_data1[112+i])
+  ts.APE1[i] = (abs((trueVal-fcast.out)/trueVal))*100
+}
+
+#Printing APE
+ts.APE1
+
+#Plot of APE for 1 step ahead forecast
+plot(ts.APE1, type="o", lwd=2, ylab="Absolute Percentage Error", 
+     main="12 Step Ahead Recursive Backtest Forecast")
+```
+
+Data of Total Private Construction Spending: Manufacturing
+```{r}
+#1 step ahead forecast/APE: Total Private Construction Spending: Manufacturing
+ts.APE1 = vector()
+for (i in 1:25){
+  win.f = ts(ts_data2[1:(112+i)], start = c(1993,1), frequency = 12)
+  fcast.out = as.vector(as.data.frame(
+    forecast(model=main_mod2, object = win.f, h = 1))[,2])
+  trueVal = as.vector(ts_data2[112+i])
+  ts.APE1[i] = (abs((trueVal-fcast.out)/trueVal))*100
+}
+
+#Printing APE
+ts.APE1
+
+#Plot of APE for 1 step ahead forecast
+plot(ts.APE1, type="o", lwd=2, ylab="Absolute Percentage Error", 
+     main="12 Step Ahead Recursive Backtest Forecast")
+```
+
+## (14.C)
+It appears from our findings in part (A) and part (B) that the forecasts perform better with shorter horizons. We observe that there is smaller mean absolute percentage errors for our one-step ahead forecasts than for our twelve-step ahead forecasts. This conclusion makes sense given some of the inherent flaws with multi-step forecasts. One of the issues in multi-step forecasts is an inability to account for dependencies between predictions, meaning that prediction at period 2 can't be dependent on period 1, which we see is often the case for time series data. That being said, the main issue with recursive multi-step forecasting is that it causes an accumulation in the prediction errors over time, which degrades the forecast performance quite quickly, especially as we forecast over longer horizons. For these reasons, it is not all too surprising that our one-step ahead forecast performed better.
+
+## (14.D)
+
+California Construction Employment data
+
+```{r}
+#Moving Average for 12 step ahead 
+ts.fcast = data.frame()
+ts.MAPE1 = vector()
+for (i in 1:25) {
+  win.f = ts(ts_data1[i:(100+i)], start = c(1990,1)+c(i%%12,i%%12), 
+             frequency = 12)
+  
+  if (i !=25){ts.fcast = rbind(ts.fcast, as.data.frame(
+    forecast(model=main_mod,object=win.f, h=12))[1,])}
+  else {ts.fcast=rbind(ts.fcast,as.data.frame(
+    forecast(model=main_mod2,object=win.f, h=12)))}
+  
+  fcast.out=as.vector(as.data.frame(
+    forecast(model=main_mod, object=win.f, h=12))[,2])
+  trueVal = as.vector(ts_data1[(101+i):(112+i)])
+  ts.MAPE1[i]=mean(abs((trueVal-fcast.out)/trueVal))*100
+  
+  
+}
+
+plot(ts.MAPE1, 
+main="California Construction Employment Moving Window 
+12 Steps Ahead Forecast", 
+ylab="MAPE", xlab="Iteration Index", pch=20)
+```
+
+California Construction Employment data
+
+```{r}
+#Moving Average for 1 step ahead 
+ts.fcast = data.frame()
+ts.MAPE1 = vector()
+for (i in 1:25) {
+  win.f = ts(ts_data1[i:(100+i)], start = c(1990,1)+c(i%%12,i%%12), 
+             frequency = 12)
+  
+  if (i !=25){ts.fcast = rbind(ts.fcast, as.data.frame(
+    forecast(model=main_mod,object=win.f, h=1))[1,])}
+  else {ts.fcast=rbind(ts.fcast,as.data.frame(
+    forecast(model=main_mod,object=win.f, h=1)))}
+  
+  fcast.out=as.vector(as.data.frame(
+    forecast(model=main_mod, object=win.f, h=1))[,2])
+  trueVal = as.vector(ts_data1[101+i])
+  ts.MAPE1[i]=mean(abs((trueVal-fcast.out)/trueVal))*100
+  
+  
+}
+
+plot(ts.MAPE1, main="California Construction Employment Moving
+     Window 1 Step Ahead Forecast", ylab="MAPE",xlab="Iteration Index", pch=20)
+```
+
+Total Private  Commercial Construction Spending
+
+```{r}
+#Moving Average for 12 step ahead Total Private Construction Spending: 
+#Manufacturing
+
+ts.fcast = data.frame()
+ts.MAPE1 = vector()
+for (i in 1:25) {
+  win.f = ts(ts_data2[i:(100+i)], start = c(1993,1)+c(i%%12,i%%12),
+             frequency = 12)
+  
+  if (i !=25){ts.fcast = rbind(ts.fcast, as.data.frame(
+    forecast(model=main_mod2,object=win.f, h=12))[1,])}
+  else {ts.fcast=rbind(ts.fcast,as.data.frame(
+    forecast(model=main_mod2,object=win.f, h=12)))}
+  
+  fcast.out=as.vector(as.data.frame(
+    forecast(model=main_mod2, object=win.f, h=12))[,2])
+  trueVal = as.vector(ts_data1[(101+i):(112+i)])
+  ts.MAPE1[i]=mean(abs((trueVal-fcast.out)/trueVal))*100
+  
+  
+}
+
+plot(ts.MAPE1, main="California Construction Employment Moving Window 
+     12 Steps Ahead Forecast", ylab="MAPE", xlab="Iteration Index", pch=20)
+```
+
+Total Private Commerical Construction Spending
+
+```{r}
+#Moving Average for 1 step ahead (Total Private Construction Spending: 
+#Manufacturing) 
+ts.fcast = data.frame()
+ts.MAPE1 = vector()
+for (i in 1:25) {
+  win.f = ts(ts_data2[i:(100+i)], start = c(1993,1)+c(i%%12,i%%12), 
+             frequency = 12)
+  
+  if (i !=25){ts.fcast = rbind(ts.fcast, as.data.frame(
+    forecast(model=main_mod2,object=win.f, h=1))[1,])}
+  else {ts.fcast=rbind(ts.fcast,as.data.frame(
+    forecast(model=main_mod2,object=win.f, h=1)))}
+  
+  fcast.out=as.vector(as.data.frame(
+    forecast(model=main_mod2, object=win.f, h=1))[,2])
+  trueVal = as.vector(ts_data1[101+i])
+  ts.MAPE1[i]=mean(abs((trueVal-fcast.out)/trueVal))*100
+  
+  
+}
+
+plot(ts.MAPE1, 
+main="Total Private Construction Spending: Manufacturing Moving 
+Window 1 Step Ahead Forecast", ylab="MAPE", 
+     xlab="Iteration Index", pch=20)
+```
+
+## (14.E)
+
+For our recursive backtesting scheme we saw that there were jumps in the MAPE among our iterations and that the 1 step ahead recursive forecasting scheme showed on average lower MAPE than the 12 step ahead. The almost routine and structural looking spikes in the MAPE suggest some form of seasonality within our data set. For the moving average scheme, we see that the one step ahead had a more sporadic MAPE, but followed the same general trend as the MAPE for the 12 step ahead. More notably, we see a recurring pattern for the moving averages showing that as we forecast new observations and add them to the data set, our MAPE tends to decrease, but after a certain point increase again. This trend occurs much faster for the 12 step ahead than the 1 step ahead, in that the 12 step ahead model's MAPE decreases at a faster rate than the 1 step ahead model. The variance in our MAPE is only natural due to the nature of forecasting, but this increase could also be due to the function looking at a new window to use to forecast.  
+
+
+##############
+# III. Conclusions and Future Work
+##############
+
+I would say that the main takeaway from this research is the distinction to be made between your choice of forecasting methods. We see that there are strengths and weaknesses to both ARIMA and VAR forecasts. We note that the Vector Auto Regression model does not account for moving average terms, but instead tries to approximate the moving average by extra AR lags (which is more complex than just using an ARIMA model). That being said, VAR allows for us to model stochastic processes more robustly, which is often present in time series data. To determine the best method for our data, especially in future works, we would want to use a similar process where we test both our ARIMA and VAR models using a moving window backtesting scheme to then forecast either one-step or multiple steps ahead. Then we would look to compare the performance of each model by examining their accuracy statistics, and finally generate a preferred model. In conclusion, I would say this research project provided an outline of the different selection criteria used when performing forecasts on real world data.  
+
+##############
+# IV. References 
+##############
+
+$\text{\underline{Citations:}}$
+U.S. Bureau of Labor Statistics, All Employees: Construction in California [CACONSN], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/CACONSN, December 8, 2020.
+
+U.S. Census Bureau, Total Private Construction Spending: Manufacturing [PRMFGCON], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/PRMFGCON, December 8, 2020.
+
+
+##############
+# V. R Source Code 
+##############
+The source code is provided throughout the document and is commented frequently to help the reader understand what we were doing at each step of the process. 
